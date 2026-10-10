@@ -1,9 +1,0 @@
-Criterion,Winner,Winning_Value
-Lowest MAE,LSTM,0.5913629039784015
-Lowest RMSE,LSTM,1.351016694531622
-Highest R²,LSTM,0.9275494108289574
-Highest breach recall,LSTM,0.6
-Lowest false alarm ratio,Random Forest,0.10810810810810811
-Highest F1-score,LSTM,0.7170731707317074
-Highest balanced accuracy,LSTM,0.7987407303763817
-Fastest training,XGBoost,1.0783998999977484
