@@ -1,2 +1,0 @@
-Depot,Data_Source,Sampling_Interval,Planning_Capacity_Threshold_kW,Warning_Threshold_kW,Training_Rows,Validation_Rows,Heldout_Test_Rows,Training_Start,Training_End,Validation_Start,Validation_End,Test_Start,Test_End
-Bexleyheath,UK Power Networks Optimise Prime,15 minutes,17.0,13.600000000000001,25632,3744,7392,2021-07-08,2022-03-31 23:45:00,2022-04-01,2022-05-09 23:45:00,2022-05-10,2022-07-25 23:45:00
