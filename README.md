@@ -1,24 +1,16 @@
-# Optivolt EV Depot Intelligence Portal — LSTM selected model
+# Optivolt EV Depot Intelligence Portal — LSTM matched-UI version
 
-Run locally:
+This version keeps the visual design and detailed plotting workflow of the
+previous XGBoost Streamlit app, while adapting the selected model to LSTM.
 
-```bash
-python -m pip install -r requirements.txt
-streamlit run app.py
-```
+Important:
+- Deploy with Python 3.12 on Streamlit Community Cloud.
+- Keep your existing nine UK Power Networks Optimise Prime depot CSV files
+  in the repository root.
+- Upload the files in this package to the same repository root.
+- `app.py` replaces the previous app.py.
+- `requirements.txt` replaces the previous requirements file.
 
-The app preserves the multi-depot, upload, scenario, performance, alerts, reports,
-archive and admin workflow while changing the selected operational model to LSTM.
-
-Final EPA comparison:
-- Previous-day same-time baseline
-- Random Forest
-- XGBoost
-- LSTM (selected final model)
-
-The included Bexleyheath evidence CSVs allow the app to display the final EPA
-held-out results and recursive 24-hour LSTM forecast without retraining during
-normal Bexleyheath navigation.
-
-Planning thresholds are planning values, not verified contracted grid limits.
-The bundled Optimise Prime data are historical and do not represent live telemetry.
+Selected model: LSTM
+Comparison: previous-day same-time baseline, Random Forest, XGBoost, LSTM.
+Planning Capacity Threshold terminology is retained.
