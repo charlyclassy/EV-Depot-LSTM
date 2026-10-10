@@ -453,7 +453,7 @@ def _load_saved_builtin_model(depot_name: str):
     missing = [p.name for p in (model_path, scaler_path) if not p.exists()]
     if missing:
         raise FileNotFoundError(
-            f"Saved LSTM artifacts for {depot_name} are not available: {', '.join(missing)}. "
+            f"LSTM model artifacts for {depot_name} are not available: {', '.join(missing)}. "
             "Run the supplied built-in model training workflow once, commit the generated "
             "models folder to GitHub, then reboot the app."
         )
@@ -482,7 +482,7 @@ def _load_pretrained_builtin_pipeline(
     capacity_kw: float,
     horizon_hours: int,
 ):
-    """Run inference/evaluation from a saved depot-specific LSTM; never call fit()."""
+    """Run inference/evaluation from a depot-specific LSTM model; never call fit()."""
     source_df = load_real_depot_data(depot_name)
     df = _standardise_input(source_df)
 
@@ -537,7 +537,7 @@ def _load_pretrained_builtin_pipeline(
         model, history_series, scaler_bundle, horizon_hours
     )
 
-    trained_at = saved_metadata.get("trained_at", "Saved model artifact")
+    trained_at = saved_metadata.get("trained_at", "Model artifact")
     summary_metadata = {
         "model_type": "LSTM Depot Demand Forecast Model",
         "training_date": trained_at,
@@ -719,7 +719,7 @@ def execute_production_ml_pipeline(
     """
     Normal dashboard path.
 
-    Built-in depots load saved depot-specific LSTM artifacts and never train when
+    Built-in depots load depot-specific LSTM model artifacts and never train when
     the user changes navigation or selects a depot. Training remains an explicit
     action for uploaded data.
     """
@@ -1961,7 +1961,7 @@ with st.sidebar:
         )
         if selected_uploaded_df is None:
             st.error(
-                f"Saved telemetry for {selected_depot} could not be loaded."
+                f"Stored telemetry for {selected_depot} could not be loaded."
             )
             st.stop()
 
@@ -2316,7 +2316,7 @@ elif nav_selection == "🏢 Depots Setup":
 
         if st.button("Save Depot Configuration"):
             st.toast(
-                f"{st.session_state['current_depot']} configuration saved successfully."
+                f"{st.session_state['current_depot']} configuration updated successfully."
             )
 
 elif nav_selection == "📊 Upload Depot Data":
@@ -2326,7 +2326,7 @@ elif nav_selection == "📊 Upload Depot Data":
 
     if saved_registry:
         with st.container(border=True):
-            st.markdown("### Saved Uploaded Depots")
+            st.markdown("### Uploaded Depot Records")
             st.caption(
                 "Only user-uploaded depots can be removed. The nine built-in "
                 "Optimise Prime depots are protected."
@@ -2404,7 +2404,7 @@ elif nav_selection == "📊 Upload Depot Data":
         value="New Depot",
         help=(
             "Enter a unique name for a new uploaded depot. If you deliberately use "
-            "the name of an existing uploaded depot, its saved telemetry will be updated."
+            "the name of an existing uploaded depot, its stored telemetry will be updated."
         ),
     )
 
@@ -3402,7 +3402,7 @@ elif nav_selection == "📊 Upload Depot Data":
     elif st.session_state.get("uploaded_depots_registry"):
         st.info(
             f"{len(st.session_state['uploaded_depots_registry'])} uploaded depot(s) are "
-            "saved. Select any of them from the left-hand depot selector."
+            "available. Select any of them from the left-hand depot selector."
         )
 
 elif nav_selection == "📈 Demand Forecast":
