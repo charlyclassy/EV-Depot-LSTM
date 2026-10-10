@@ -1,16 +1,18 @@
-# Optivolt EV Depot Intelligence Portal — LSTM matched-UI version
+# Optivolt EV Depot Intelligence Portal — saved-model deployment
 
-This version keeps the visual design and detailed plotting workflow of the
-previous XGBoost Streamlit app, while adapting the selected model to LSTM.
+Selecting a built-in depot now loads its saved depot-specific LSTM model.
+Normal navigation does not train the model.
 
-Important:
-- Deploy with Python 3.12 on Streamlit Community Cloud.
-- Keep your existing nine UK Power Networks Optimise Prime depot CSV files
-  in the repository root.
-- Upload the files in this package to the same repository root.
-- `app.py` replaces the previous app.py.
-- `requirements.txt` replaces the previous requirements file.
+## One-time model build
 
-Selected model: LSTM
-Comparison: previous-day same-time baseline, Random Forest, XGBoost, LSTM.
-Planning Capacity Threshold terminology is retained.
+1. Copy this package into the GitHub repository.
+2. Keep the nine Optimise Prime depot CSV files in the repository root.
+3. In GitHub, open **Actions**.
+4. Select **Build saved LSTM depot models**.
+5. Click **Run workflow**.
+6. Wait for it to finish. The workflow commits the saved model files to `models/`.
+7. Reboot the Streamlit app.
+
+After that, Bexleyheath, Dartford, Islington, Mount Pleasant, Orpington,
+Premier Park, Whitechapel, Camden, and Victoria load saved models and run
+inference only. Training remains an explicit operation for uploaded data.
