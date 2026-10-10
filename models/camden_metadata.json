@@ -1,0 +1,13 @@
+{
+  "depot": "Camden",
+  "trained_at": "2026-10-10 18:23 UTC",
+  "lookback_intervals": 96,
+  "sampling_minutes": 15,
+  "epochs_requested": 40,
+  "epochs_completed": 14,
+  "batch_size": 256,
+  "train_start": "2021-07-08 00:00:00",
+  "train_end": "2022-03-31 23:45:00",
+  "validation_start": "2022-04-01 00:00:00",
+  "validation_end": "2022-05-09 23:45:00"
+}
