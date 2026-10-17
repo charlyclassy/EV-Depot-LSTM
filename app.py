@@ -5,6 +5,10 @@ from datetime import datetime
 import pandas as pd
 import json
 import hashlib
+import hmac
+import os
+import secrets
+import sqlite3
 import numpy as np
 import plotly.graph_objects as go
 import re
@@ -190,6 +194,191 @@ def _build_operational_pdf(report_rows, title: str) -> bytes:
     ))
     doc.build(story)
     return buffer.getvalue()
+
+
+# ---------------------------------------------------------------------
+# LOCAL ACCOUNT MANAGEMENT (SQLite). For a multi-replica deployment use
+# a shared identity provider and managed database instead of local disk.
+# ---------------------------------------------------------------------
+USERS_DB = Path(os.environ.get("OPTIVOLT_USERS_DB", ".app_state/optivolt_users.sqlite3"))
+ACCOUNT_ROLES = ("Admin", "Analyst")
+
+
+def _users_conn():
+    USERS_DB.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(USERS_DB), timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 10000")
+    conn.execute("""CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        display_name TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('Admin','Analyst')),
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )""")
+    conn.commit()
+    return conn
+
+
+def _password_hash(password):
+    if len(password) < 12:
+        raise ValueError("Password must contain at least 12 characters.")
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode('utf-8'), salt=salt, n=2**14, r=8, p=1)
+    return 'scrypt$16384$8$1$' + salt.hex() + '$' + digest.hex()
+
+
+def _verify_password(password, stored):
+    try:
+        scheme, n, r, p, salt_hex, digest_hex = stored.split('$')
+        if scheme != 'scrypt':
+            return False
+        computed = hashlib.scrypt(password.encode('utf-8'), salt=bytes.fromhex(salt_hex),
+                                  n=int(n), r=int(r), p=int(p))
+        return hmac.compare_digest(computed, bytes.fromhex(digest_hex))
+    except (ValueError, TypeError):
+        return False
+
+
+def _bootstrap_admin():
+    """Only create first admin from deployment secrets; never a fixed default."""
+    with _users_conn() as conn:
+        count = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
+        if count:
+            return True
+        email = os.environ.get('OPTIVOLT_ADMIN_EMAIL', '').strip().lower()
+        password = os.environ.get('OPTIVOLT_ADMIN_PASSWORD', '')
+        name = os.environ.get('OPTIVOLT_ADMIN_NAME', 'Optivolt Administrator').strip()
+        if not email or not password:
+            try:
+                email = email or str(st.secrets.get('OPTIVOLT_ADMIN_EMAIL', '')).strip().lower()
+                password = password or str(st.secrets.get('OPTIVOLT_ADMIN_PASSWORD', ''))
+                name = str(st.secrets.get('OPTIVOLT_ADMIN_NAME', name))
+            except Exception:
+                pass
+        if not email or '@' not in email or len(password) < 12:
+            return False
+        conn.execute('INSERT INTO users(email, display_name, password_hash, role) VALUES(?,?,?,?)',
+                     (email, name, _password_hash(password), 'Admin'))
+        return True
+
+
+def _active_identity():
+    uid = st.session_state.get('user_id')
+    if not uid:
+        return None
+    with _users_conn() as conn:
+        row = conn.execute('SELECT user_id,email,display_name,role,active FROM users WHERE user_id=?', (uid,)).fetchone()
+        if not row or not row['active']:
+            return None
+        return dict(row)
+
+
+def _login_user(email, password):
+    with _users_conn() as conn:
+        user = conn.execute('SELECT * FROM users WHERE email=? AND active=1', (email.strip().lower(),)).fetchone()
+        if not user or not _verify_password(password, user['password_hash']):
+            return None
+        return dict(user)
+
+
+def _manage_account(action, actor_id, target_id=None, **details):
+    """Mutations are authorised in the database, never only by a UI flag."""
+    with _users_conn() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        actor = conn.execute('SELECT * FROM users WHERE user_id=? AND active=1', (actor_id,)).fetchone()
+        if not actor or actor['role'] != 'Admin':
+            raise PermissionError('Administrator permissions are required.')
+        if action == 'create':
+            email = details['email'].strip().lower()
+            if '@' not in email or not email.split('@')[-1].count('.'):
+                raise ValueError('Enter a valid email address.')
+            role = details['role']
+            if role not in ACCOUNT_ROLES:
+                raise ValueError('Invalid role.')
+            conn.execute('INSERT INTO users(email,display_name,password_hash,role) VALUES(?,?,?,?)',
+                         (email, details['display_name'].strip(), _password_hash(details['password']), role))
+        else:
+            target = conn.execute('SELECT * FROM users WHERE user_id=?', (target_id,)).fetchone()
+            if not target:
+                raise ValueError('Account no longer exists.')
+            if action == 'password':
+                conn.execute('UPDATE users SET password_hash=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?',
+                             (_password_hash(details['password']), target_id))
+            elif action in ('role','active'):
+                if target_id == actor_id:
+                    raise ValueError('You cannot change your own role or account status.')
+                if action == 'role':
+                    if details['role'] not in ACCOUNT_ROLES:
+                        raise ValueError('Invalid role.')
+                    conn.execute('UPDATE users SET role=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?',
+                                 (details['role'], target_id))
+                else:
+                    conn.execute('UPDATE users SET active=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?',
+                                 (int(details['active']), target_id))
+            else:
+                raise ValueError('Unknown account operation.')
+        conn.commit()
+
+
+def _accounts_panel():
+    st.subheader('User Accounts')
+    st.caption('Only administrators can create, update and disable accounts. Passwords are stored as salted scrypt hashes.')
+    identity = _active_identity()
+    if not identity or identity['role'] != 'Admin':
+        st.warning('Administrator permission is required.')
+        return
+    with _users_conn() as conn:
+        users = [dict(u) for u in conn.execute('SELECT user_id,email,display_name,role,active,created_at FROM users ORDER BY user_id')]
+    st.dataframe(pd.DataFrame([{'Name':u['display_name'], 'Email':u['email'], 'Role':u['role'],
+                                'Status':'Active' if u['active'] else 'Disabled','Created':u['created_at']}
+                               for u in users]), use_container_width=True, hide_index=True)
+    with st.expander('Create a user account'):
+        with st.form('create_account_form', clear_on_submit=True):
+            name = st.text_input('Full name')
+            email = st.text_input('Email address')
+            role = st.selectbox('Role', ACCOUNT_ROLES, index=1)
+            password = st.text_input('Initial password (12+ characters)', type='password')
+            confirm = st.text_input('Confirm password', type='password')
+            submitted = st.form_submit_button('Create account')
+        if submitted:
+            try:
+                if not name.strip() or password != confirm:
+                    raise ValueError('Enter a name and matching passwords.')
+                _manage_account('create', identity['user_id'], email=email, display_name=name, role=role, password=password)
+                st.success('Account created.'); st.rerun()
+            except (ValueError, sqlite3.IntegrityError, PermissionError) as exc:
+                st.error(str(exc))
+    with st.expander('Manage existing accounts'):
+        choices = {f"{u['display_name']} — {u['email']}":u for u in users}
+        selected = choices[st.selectbox('Select account', list(choices))]
+        action = st.radio('Action', ['Change role','Reset password','Enable / disable'], horizontal=True)
+        if action == 'Change role':
+            value = st.selectbox('New role', ACCOUNT_ROLES, index=ACCOUNT_ROLES.index(selected['role']))
+            if st.button('Save role'):
+                try:
+                    _manage_account('role', identity['user_id'], selected['user_id'], role=value)
+                    st.success('Role updated.'); st.rerun()
+                except (ValueError, PermissionError) as exc: st.error(str(exc))
+        elif action == 'Reset password':
+            value = st.text_input('New password (12+ characters)', type='password')
+            confirm = st.text_input('Confirm new password', type='password')
+            if st.button('Reset password'):
+                try:
+                    if value != confirm: raise ValueError('Passwords do not match.')
+                    _manage_account('password', identity['user_id'], selected['user_id'], password=value)
+                    st.success('Password changed.'); st.rerun()
+                except (ValueError, PermissionError) as exc: st.error(str(exc))
+        else:
+            new_active = st.checkbox('Account enabled', value=bool(selected['active']))
+            if st.button('Update account status'):
+                try:
+                    _manage_account('active', identity['user_id'], selected['user_id'], active=new_active)
+                    st.success('Account status updated.'); st.rerun()
+                except (ValueError, PermissionError) as exc: st.error(str(exc))
 
 
 st.set_page_config(page_title="Optivolt EV Depot Intelligence Portal", page_icon="⚡", layout="wide")
@@ -3239,29 +3428,40 @@ div[data-baseweb="select"] > div {
 </style>
 """, unsafe_allow_html=True)
 
-if not st.session_state["authenticated"]:
+if not _bootstrap_admin():
+    st.error('Initial administrator setup is required. Set OPTIVOLT_ADMIN_EMAIL and OPTIVOLT_ADMIN_PASSWORD (12+ characters) in deployment secrets, then restart the app.')
+    st.stop()
+
+identity = _active_identity()
+if not identity:
+    st.session_state['authenticated'] = False
+    st.session_state.pop('user_id', None)
     _, col_l2, _ = st.columns([1, 2, 1])
     with col_l2:
-        st.markdown("<div style='height: 100px;'></div>", unsafe_allow_html=True)
-        st.markdown(f"""
-        <div class="ov-hero" style="text-align:center; margin-bottom:22px;">
-            <div class="ov-kicker">Optivolt Solutions Limited</div>
-            <div class="ov-title">⚡ {st.session_state["portal_title"]}</div>
-            <p class="ov-subtitle" style="margin:0 auto;">
-                Predictive demand forecasting and capacity planning for electric vehicle depot operations.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-        with st.container(border=True):
-            st.markdown("<h4 style='color:#1E293B;'>Sign in to your account</h4>", unsafe_allow_html=True)
-            st.text_input("Username or corporate email", value="operations@optivolt.co.uk")
-            st.text_input("Password", type="password", value="••••••••••••")
-            if st.button("Authenticate Workspace Access", use_container_width=True):
-                st.session_state["authenticated"] = True
+        st.markdown("<div style='height: 75px;'></div>", unsafe_allow_html=True)
+        st.title('⚡ Optivolt Workspace')
+        st.caption('Sign in with an account provisioned by your Optivolt administrator.')
+        with st.form('optivolt_login'):
+            login_email = st.text_input('Email address')
+            login_password = st.text_input('Password', type='password')
+            do_login = st.form_submit_button('Sign in', use_container_width=True)
+        if do_login:
+            user = _login_user(login_email, login_password)
+            if user:
+                st.session_state['authenticated'] = True
+                st.session_state['user_id'] = user['user_id']
                 st.rerun()
-        st.stop()
+            st.error('Incorrect email or password, or the account is disabled.')
+    st.stop()
+
+st.session_state['authenticated'] = True
 
 with st.sidebar:
+    st.caption(f"Signed in: {identity['display_name']} · {identity['role']}")
+    if st.button('Sign out', key='account_sign_out'):
+        st.session_state.pop('user_id', None)
+        st.session_state['authenticated'] = False
+        st.rerun()
     st.markdown(
         f"""
         <div style="
@@ -7482,7 +7682,12 @@ elif nav_selection == "📜 Archive History":
     )
 
 elif nav_selection == "⚙️ Settings / Admin":
+    if identity['role'] != 'Admin':
+        st.error('Settings / Admin is available to administrator accounts only.')
+        st.stop()
     st.title("⚙️ Settings / Admin")
+    with st.expander('User Accounts & Access Management', expanded=False):
+        _accounts_panel()
     st.caption(
         "Manage depot thresholds, forecast display, and upload settings. Advanced model details are available below."
     )
